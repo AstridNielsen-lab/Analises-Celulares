@@ -4,30 +4,22 @@ import {
   CellAnalysisLevel, 
   BloodCellType,
   PathologyType,
-  BloodAnalysisStatistics,
-  LeukocyteType,
-  MaturationAssessment,
-  DifferentialCount
+  BloodAnalysisStatistics
 } from '../types/analysis';
 
 export class CellAnalyzer {
   // Catalog of detectable pathologies with descriptions
   private readonly PATHOLOGY_DESCRIPTIONS: { [key in PathologyType]: string } = {
     anemia: "Condição caracterizada por uma deficiência em glóbulos vermelhos ou hemoglobina, resultando em menor transporte de oxigênio. Indicadores: microcitose e hipocromia.",
+    polycythemia: "Aumento anormal dos glóbulos vermelhos, podendo levar ao espessamento do sangue e riscos de trombose. Indicadores: macrocitose e hemoglobina elevada.",
+    sickleCell: "Distúrbio genético que causa a formação de hemácias em forma de foice, provocando anemia hemolítica e crises vaso-oclusivas.",
+    spherocytosis: "Condição em que as hemácias assumem formato esférico em vez de bicôncavo, frequentemente ocasionando anemia hemolítica e aumento do MCHC.",
+    elliptocytosis: "Alteração na forma das hemácias, que ficam alongadas ou elípticas, podendo reduzir a eficiência no transporte de oxigênio.",
     leukemia: "Grupo de cânceres que afetam os glóbulos brancos, caracterizados pela produção excessiva de células anormais, comprometendo a função imunológica.",
     lymphoma: "Tipo de câncer que afeta os linfócitos, podendo causar aumento dos linfonodos e alterações na contagem celular periférica.",
     myeloma: "Câncer das células plasmáticas, frequentemente associado a produção anormal de proteínas e alterações nas contagens sanguíneas.",
-    myelodysplasia: "Síndrome caracterizada por hematopoiese ineficaz com alterações morfológicas em uma ou mais linhagens celulares. Risco aumentado de evolução para LMA.",
-    acuteLeukemia: "Proliferação rápida de células blásticas imaturas (>20%) com comprometimento da função medular normal. Requer intervenção imediata.",
-    chronicLeukemia: "Acúmulo progressivo de células maduras ou parcialmente maduras, com evolução mais lenta. Pode ser mielóide ou linfóide.",
-    megaloblasticAnemia: "Anemia causada por deficiência de B12 ou folato, caracterizada por eritrócitos grandes e núcleos imaturos (megaloblastos).",
-    aplasticAnemia: "Falência medular com pancitopenia grave. Redução significativa de todas as linhagens celulares.",
-    polycythemia: "Aumento anormal dos glóbulos vermelhos, podendo levar ao espessamento do sangue e riscos de trombose. Indicadores: macrocitose e hemoglobina elevada.",
     thrombocytopenia: "Condição marcada por baixa contagem de plaquetas, aumentando o risco de sangramentos e hematomas.",
-    sickleCell: "Distúrbio genético que causa a formação de hemácias em forma de foice, provocando anemia hemolítica e crises vaso-oclusivas.",
     thalassemia: "Doença hereditária que afeta a produção de hemoglobina, resultando em anemia microcítica e hipocrômica com diferentes graus de severidade.",
-    spherocytosis: "Condição em que as hemácias assumem formato esférico em vez de bicôncavo, frequentemente ocasionando anemia hemolítica e aumento do MCHC.",
-    elliptocytosis: "Alteração na forma das hemácias, que ficam alongadas ou elípticas, podendo reduzir a eficiência no transporte de oxigênio.",
     neutrophilia: "Elevação na contagem de neutrófilos, geralmente sinal de infecção, inflamação ou resposta ao estresse.",
     lymphocytosis: "Aumento dos linfócitos, podendo indicar infecções virais, inflamação crônica ou distúrbios hematológicos.",
     monocytosis: "Elevação dos monócitos, frequentemente associada a processos inflamatórios crônicos, infecções ou desordens hematológicas.",
@@ -35,23 +27,9 @@ export class CellAnalyzer {
     basophilia: "Contagem elevada de basófilos, que pode ocorrer em reações alérgicas, inflamações crônicas ou desordens mieloproliferativas."
   };
 
-  // Maturation stages criteria
-  private readonly MATURATION_CRITERIA = {
-    myeloid: {
-      blast: { size: [10, 15], chromatin: 'loose', nucleoli: true },
-      promyelocyte: { size: [12, 18], granules: 'primary', nucleoli: false },
-      myelocyte: { size: [12, 18], granules: 'secondary', nucleusShape: 'round' },
-      metamyelocyte: { size: [10, 16], nucleusShape: 'kidney' },
-      band: { size: [10, 14], nucleusShape: 'curved' },
-      segmented: { size: [10, 14], nucleusShape: 'segmented' }
-    },
-    erythroid: {
-      proerythroblast: { size: [12, 20], chromatin: 'fine', nucleoli: true },
-      basophilic: { size: [10, 16], chromatin: 'coarse', hemoglobin: 'none' },
-      polychromatophilic: { size: [8, 12], chromatin: 'condensed', hemoglobin: 'moderate' },
-      orthochromatic: { size: [7, 10], chromatin: 'pyknotic', hemoglobin: 'high' }
-    }
-  };
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D;
+  private startTime: Date;
 
   // Normal ranges for blood cells (in pixels for image analysis)
   private readonly NORMAL_RANGES = {
@@ -66,46 +44,25 @@ export class CellAnalyzer {
     thrombocyte: {
       size: { min: 2, max: 4 }, // Smallest blood cells
       colorIntensity: { min: 0.4, max: 0.6 }
-    },
-    blast: {
-      size: { min: 15, max: 20 }, // Larger than mature cells
-      nucleusRatio: { min: 0.7, max: 0.9 } // High N:C ratio
-    },
-    megaloblast: {
-      size: { min: 20, max: 25 }, // Largest cells
-      nucleusRatio: { min: 0.6, max: 0.8 } // Abnormal nuclear maturation
     }
   };
 
-  // Dysplasia criteria
-  private readonly DYSPLASIA_FEATURES = {
-    erythroid: [
-      'nuclear budding',
-      'internuclear bridging',
-      'megaloblastic changes',
-      'ring sideroblasts'
-    ],
-    myeloid: [
-      'hypogranulation',
-      'pseudo-Pelger-Huet',
-      'nuclear hyposegmentation',
-      'bizarre nuclear shapes'
-    ],
-    megakaryocytic: [
-      'micromegakaryocytes',
-      'nuclear hypolobulation',
-      'separated nuclear lobes'
-    ]
-  };
-
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
-  private startTime: Date;
+  // Kernel for Gaussian blur
+  private readonly GAUSSIAN_KERNEL = [
+    [0.075, 0.124, 0.075],
+    [0.124, 0.204, 0.124],
+    [0.075, 0.124, 0.075]
+  ];
 
   constructor() {
     this.canvas = document.createElement('canvas');
     this.ctx = this.canvas.getContext('2d')!;
     this.startTime = new Date();
+  }
+
+  // Method to get the complete pathology catalog
+  public getPathologyCatalog(): { [key in PathologyType]: string } {
+    return this.PATHOLOGY_DESCRIPTIONS;
   }
 
   async analyzeImage(imageFile: File): Promise<CellAnalysisResult> {
@@ -123,14 +80,9 @@ export class CellAnalyzer {
       
       const cells = this.detectCells(processedData, imageData);
       const cellData = this.analyzeCells(cells, processedData, imageData);
-      const statistics = this.calculateEnhancedStatistics(cellData);
+      const statistics = this.calculateStatistics(cellData);
       
-      // Perform advanced analysis
-      const maturationAssessment = this.assessCellularMaturation(cellData);
-      const differentialCount = this.performDifferentialCount(cellData);
-      const dysplasiaAnalysis = this.analyzeDysplasticFeatures(cellData);
-      
-      this.drawDetailedAnnotations(cells, cellData, maturationAssessment);
+      this.drawAnnotations(cells, cellData);
       
       const executionTime = new Date().getTime() - this.startTime.getTime();
       
@@ -139,13 +91,7 @@ export class CellAnalyzer {
         statistics,
         executionTime,
         abnormalityLevel: this.determineAbnormalityLevel(statistics),
-        diagnosis: this.generateComprehensiveDiagnosis(
-          cellData as BloodCellData[],
-          statistics as BloodAnalysisStatistics,
-          maturationAssessment,
-          differentialCount,
-          dysplasiaAnalysis
-        ),
+        diagnosis: this.generateDetailedDiagnosis(cellData as BloodCellData[], statistics as BloodAnalysisStatistics),
         processedImageUrl: this.canvas.toDataURL()
       };
     } catch (error) {
@@ -171,163 +117,171 @@ export class CellAnalyzer {
     const { data, width, height } = imageData;
     const processed = new Float32Array(data.length / 4);
     
-    // Enhanced grayscale conversion with weighted channels for better cell differentiation
+    // Conversão para escala de cinza com peso aprimorado para características das células
     for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      
-      // Enhanced weighting for better detection of cellular features
-      const grayscale = (
-        r * 0.4 +   // Red channel emphasized for hemoglobin
-        g * 0.35 +  // Green channel for nuclear details
-        b * 0.25    // Blue channel for cytoplasmic features
+      let grayscale = (
+        data[i] * 0.4 +     // Canal vermelho (importante para hemácias)
+        data[i + 1] * 0.3 + // Canal verde
+        data[i + 2] * 0.3   // Canal azul
       );
-      
       processed[i / 4] = grayscale / 255;
     }
 
-    // Apply advanced image processing
-    const denoised = this.applyAdaptiveDenoising(processed, width, height);
-    const enhanced = this.applyContrastEnhancement(denoised, width, height);
-    const segmented = this.applyWatershedSegmentation(enhanced, width, height);
-    
-    return segmented;
+    const blurred = this.applyGaussianBlur(processed, width, height);
+    const edges = this.applyEdgeDetection(blurred, width, height);
+    return this.applyAdaptiveThreshold(edges, width, height);
   }
 
-  private applyAdaptiveDenoising(data: Float32Array, width: number, height: number): Float32Array {
+  private applyGaussianBlur(data: Float32Array, width: number, height: number): Float32Array {
     const output = new Float32Array(data.length);
-    const windowSize = 5;
-    const sigma = 1.5;
+    const kernelSize = 3;
+    const offset = Math.floor(kernelSize / 2);
 
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
+    for (let y = offset; y < height - offset; y++) {
+      for (let x = offset; x < width - offset; x++) {
         let sum = 0;
-        let weightSum = 0;
-
-        for (let wy = -windowSize; wy <= windowSize; wy++) {
-          for (let wx = -windowSize; wx <= windowSize; wx++) {
-            const px = x + wx;
-            const py = y + wy;
-
-            if (px >= 0 && px < width && py >= 0 && py < height) {
-              const diff = data[y * width + x] - data[py * width + px];
-              const weight = Math.exp(-(diff * diff) / (2 * sigma * sigma));
-              sum += data[py * width + px] * weight;
-              weightSum += weight;
-            }
+        for (let ky = 0; ky < kernelSize; ky++) {
+          for (let kx = 0; kx < kernelSize; kx++) {
+            const px = x + (kx - offset);
+            const py = y + (ky - offset);
+            const kernel = this.GAUSSIAN_KERNEL[ky][kx];
+            sum += data[py * width + px] * kernel;
           }
         }
-
-        output[y * width + x] = sum / weightSum;
+        output[y * width + x] = sum;
       }
     }
-
     return output;
   }
 
-  private applyContrastEnhancement(data: Float32Array, width: number, height: number): Float32Array {
-    const output = new Float32Array(data.length);
-    const histogram = new Float32Array(256).fill(0);
-    
-    // Build histogram
-    for (let i = 0; i < data.length; i++) {
-      const bin = Math.floor(data[i] * 255);
-      histogram[bin]++;
-    }
-    
-    // Calculate cumulative histogram
-    const cdf = new Float32Array(256);
-    cdf[0] = histogram[0];
-    for (let i = 1; i < 256; i++) {
-      cdf[i] = cdf[i - 1] + histogram[i];
-    }
-    
-    // Normalize CDF
-    const cdfMin = cdf[0];
-    const cdfMax = cdf[255];
-    for (let i = 0; i < 256; i++) {
-      cdf[i] = (cdf[i] - cdfMin) / (cdfMax - cdfMin);
-    }
-    
-    // Apply contrast enhancement
-    for (let i = 0; i < data.length; i++) {
-      const bin = Math.floor(data[i] * 255);
-      output[i] = cdf[bin];
-    }
-    
-    return output;
-  }
+  private applyEdgeDetection(data: Float32Array, width: number, height: number): Float32Array {
+    const edges = new Float32Array(data.length);
+    const sobelX = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
+    const sobelY = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
 
-  private applyWatershedSegmentation(data: Float32Array, width: number, height: number): Float32Array {
-    const output = new Float32Array(data.length);
-    const markers = this.findLocalMinima(data, width, height);
-    const queue: number[] = [];
-    
-    // Initialize watershed regions
-    for (let i = 0; i < markers.length; i++) {
-      if (markers[i] > 0) {
-        queue.push(i);
-        output[i] = markers[i];
-      }
-    }
-    
-    // Process queue
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      const x = current % width;
-      const y = Math.floor(current / width);
-      
-      // Check neighbors
-      const neighbors = [
-        [x + 1, y], [x - 1, y],
-        [x, y + 1], [x, y - 1]
-      ];
-      
-      for (const [nx, ny] of neighbors) {
-        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-          const idx = ny * width + nx;
-          if (output[idx] === 0) {
-            output[idx] = output[current];
-            queue.push(idx);
-          }
-        }
-      }
-    }
-    
-    return output;
-  }
-
-  private findLocalMinima(data: Float32Array, width: number, height: number): Float32Array {
-    const minima = new Float32Array(data.length);
-    const threshold = 0.1;
-    
     for (let y = 1; y < height - 1; y++) {
       for (let x = 1; x < width - 1; x++) {
-        const idx = y * width + x;
-        const value = data[idx];
-        let isMinimum = true;
-        
-        // Check 8-connected neighbors
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            const neighborValue = data[(y + dy) * width + (x + dx)];
-            if (value > neighborValue) {
-              isMinimum = false;
-              break;
-            }
+        let gx = 0, gy = 0;
+        for (let ky = 0; ky < 3; ky++) {
+          for (let kx = 0; kx < 3; kx++) {
+            const pixel = data[(y + ky - 1) * width + (x + kx - 1)];
+            gx += pixel * sobelX[ky][kx];
+            gy += pixel * sobelY[ky][kx];
           }
-          if (!isMinimum) break;
         }
-        
-        if (isMinimum && value < threshold) {
-          minima[idx] = 1;
+        edges[y * width + x] = Math.sqrt(gx * gx + gy * gy);
+      }
+    }
+    return edges;
+  }
+
+  private applyAdaptiveThreshold(data: Float32Array, width: number, height: number): Float32Array {
+    const output = new Float32Array(data.length);
+    const windowSize = 15;
+    const offset = Math.floor(windowSize / 2);
+    const C = 0.02;
+    for (let y = offset; y < height - offset; y++) {
+      for (let x = offset; x < width - offset; x++) {
+        let sum = 0, count = 0;
+        for (let wy = -offset; wy <= offset; wy++) {
+          for (let wx = -offset; wx <= offset; wx++) {
+            const px = x + wx;
+            const py = y + wy;
+            sum += data[py * width + px];
+            count++;
+          }
+        }
+        const mean = sum / count;
+        const threshold = mean - C;
+        output[y * width + x] = data[y * width + x] > threshold ? 1 : 0;
+      }
+    }
+    return output;
+  }
+
+  private detectCells(data: Float32Array, imageData: ImageData): Array<{ x: number; y: number; radius: number }> {
+    const cells: Array<{ x: number; y: number; radius: number }> = [];
+    const visited = new Set<number>();
+    const threshold = 0.2;
+
+    for (let y = 0; y < this.canvas.height; y++) {
+      for (let x = 0; x < this.canvas.width; x++) {
+        const i = y * this.canvas.width + x;
+        if (!visited.has(i) && data[i] > threshold) {
+          const radius = this.estimateRadius(x, y, data);
+          if (radius > 2) {
+            cells.push({ x, y, radius });
+            this.markVisited(x, y, radius, visited);
+          }
         }
       }
     }
-    
-    return minima;
+    return this.mergeCells(cells);
+  }
+
+  private estimateRadius(x: number, y: number, data: Float32Array): number {
+    let radius = 0;
+    const maxRadius = 50;
+    const threshold = 0.2;
+    for (let r = 1; r <= maxRadius; r++) {
+      let edgeCount = 0, totalPoints = 0;
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+        const px = Math.round(x + r * Math.cos(angle));
+        const py = Math.round(y + r * Math.sin(angle));
+        if (px >= 0 && px < this.canvas.width && py >= 0 && py < this.canvas.height) {
+          totalPoints++;
+          if (data[py * this.canvas.width + px] > threshold) {
+            edgeCount++;
+          }
+        }
+      }
+      if (totalPoints > 0 && edgeCount / totalPoints > 0.5) {
+        radius = r;
+        break;
+      }
+    }
+    return radius;
+  }
+
+  private markVisited(x: number, y: number, radius: number, visited: Set<number>) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (dx * dx + dy * dy <= radius * radius) {
+          const px = x + dx;
+          const py = y + dy;
+          if (px >= 0 && px < this.canvas.width && py >= 0 && py < this.canvas.height) {
+            visited.add(py * this.canvas.width + px);
+          }
+        }
+      }
+    }
+  }
+
+  private mergeCells(cells: Array<{ x: number; y: number; radius: number }>): Array<{ x: number; y: number; radius: number }> {
+    const merged: Array<{ x: number; y: number; radius: number }> = [];
+    const used = new Set<number>();
+    for (let i = 0; i < cells.length; i++) {
+      if (used.has(i)) continue;
+      let cell = cells[i];
+      used.add(i);
+      for (let j = i + 1; j < cells.length; j++) {
+        if (used.has(j)) continue;
+        const other = cells[j];
+        const distance = Math.sqrt(
+          Math.pow(cell.x - other.x, 2) + Math.pow(cell.y - other.y, 2)
+        );
+        if (distance < (cell.radius + other.radius) * 0.5) {
+          cell = {
+            x: Math.round((cell.x + other.x) / 2),
+            y: Math.round((cell.y + other.y) / 2),
+            radius: Math.max(cell.radius, other.radius)
+          };
+          used.add(j);
+        }
+      }
+      merged.push(cell);
+    }
+    return merged;
   }
 
   private analyzeCells(
@@ -339,12 +293,9 @@ export class CellAnalyzer {
       const size = Math.PI * Math.pow(cell.radius, 2);
       const shape = this.calculateShape(cell, processedData);
       const colorProfile = this.analyzeColorProfile(cell, imageData);
-      const nuclearFeatures = this.analyzeNuclearFeatures(cell, processedData, imageData);
-      const cellType = this.determineCellType(cell.radius, colorProfile, nuclearFeatures);
-      const leukocyteType = this.determineLeukocyteType(cellType, nuclearFeatures);
-      const morphology = this.analyzeMorphology(cell.radius, shape, colorProfile, nuclearFeatures);
-      const pathologyIndicators = this.identifyPathologies(cellType, morphology, nuclearFeatures);
-      
+      const cellType = this.determineCellType(cell.radius, colorProfile);
+      const morphology = this.analyzeMorphology(cell.radius, shape, colorProfile);
+      const pathologyIndicators = this.identifyPathologies(cellType, morphology);
       return {
         id: index + 1,
         size,
@@ -353,583 +304,290 @@ export class CellAnalyzer {
         location: this.determineLocation(cell),
         characteristics: this.determineCharacteristics(cell, shape, colorProfile.difference),
         cellType,
-        leukocyteType,
         pathologyIndicators,
-        morphology,
-        measurements: {
-          diameter: cell.radius * 2,
-          area: size,
-          perimeter: 2 * Math.PI * cell.radius,
-          circularity: shape,
-          intensity: colorProfile.intensity,
-          nuclearArea: nuclearFeatures.area
-        }
+        morphology
       };
     });
   }
 
-  private analyzeNuclearFeatures(
+  private calculateShape(
     cell: { x: number; y: number; radius: number },
-    processedData: Float32Array,
-    imageData: ImageData
-  ) {
-    const nucleusData = this.extractNuclearRegion(cell, processedData);
-    const chromatinPattern = this.analyzeChromatinPattern(nucleusData);
-    const nucleoli = this.detectNucleoli(nucleusData);
-    const shape = this.analyzeNuclearShape(nucleusData);
-    
-    return {
-      area: this.calculateNuclearArea(nucleusData),
-      chromatin: chromatinPattern,
-      nucleoli: nucleoli.length > 0,
-      shape: shape,
-      ncRatio: this.calculateNCRatio(cell, nucleusData)
-    };
+    data: Float32Array
+  ): number {
+    let perimeter = 0, validPoints = 0;
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 16) {
+      const px = Math.round(cell.x + cell.radius * Math.cos(angle));
+      const py = Math.round(cell.y + cell.radius * Math.sin(angle));
+      if (px >= 0 && px < this.canvas.width && py >= 0 && py < this.canvas.height) {
+        validPoints++;
+        if (data[py * this.canvas.width + px] > 0.5) {
+          perimeter++;
+        }
+      }
+    }
+    return validPoints > 0 ? (4 * Math.PI * cell.radius * cell.radius) / (perimeter * perimeter) : 1;
   }
 
-  private extractNuclearRegion(
+  private analyzeColorProfile(
     cell: { x: number; y: number; radius: number },
-    processedData: Float32Array
-  ): Float32Array {
-    const region = new Float32Array(Math.ceil(Math.PI * cell.radius * cell.radius));
-    let idx = 0;
-    
+    imageData: ImageData
+  ) {
+    let sumR = 0, sumG = 0, sumB = 0, count = 0;
+    const { data } = imageData;
     for (let y = cell.y - cell.radius; y <= cell.y + cell.radius; y++) {
       for (let x = cell.x - cell.radius; x <= cell.x + cell.radius; x++) {
-        if (Math.pow(x - cell.x, 2) + Math.pow(y - cell.y, 2) <= Math.pow(cell.radius, 2)) {
-          if (x >= 0 && x < this.canvas.width && y >= 0 && y < this.canvas.height) {
-            region[idx++] = processedData[y * this.canvas.width + x];
+        if (x >= 0 && x < this.canvas.width && y >= 0 && y < this.canvas.height) {
+          const idx = (y * this.canvas.width + x) * 4;
+          if (Math.pow(x - cell.x, 2) + Math.pow(y - cell.y, 2) <= Math.pow(cell.radius, 2)) {
+            sumR += data[idx];
+            sumG += data[idx + 1];
+            sumB += data[idx + 2];
+            count++;
           }
         }
       }
     }
-    
-    return region;
+    if (count === 0) return { r: 0, g: 0, b: 0, difference: 0 };
+    const avgR = sumR / count;
+    const avgG = sumG / count;
+    const avgB = sumB / count;
+    const difference = Math.sqrt(
+      Math.pow(avgR - 220, 2) +
+      Math.pow(avgG - 210, 2) +
+      Math.pow(avgB - 210, 2)
+    ) / 255;
+    return { r: avgR, g: avgG, b: avgB, difference };
   }
 
-  private analyzeChromatinPattern(nucleusData: Float32Array): 'normal' | 'condensed' | 'loose' | 'abnormal' {
-    const mean = nucleusData.reduce((sum, val) => sum + val, 0) / nucleusData.length;
-    const variance = nucleusData.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / nucleusData.length;
-    
-    if (variance < 0.01) return 'condensed';
-    if (variance > 0.05) return 'loose';
-    if (mean > 0.7) return 'abnormal';
+  private determineCellType(radius: number, colorProfile: { r: number; g: number; b: number; difference: number }): BloodCellType {
+    if (radius >= this.NORMAL_RANGES.leukocyte.size.min && radius <= this.NORMAL_RANGES.leukocyte.size.max) {
+      return 'leukocyte';
+    }
+    if (radius >= this.NORMAL_RANGES.erythrocyte.size.min && 
+        radius <= this.NORMAL_RANGES.erythrocyte.size.max &&
+        colorProfile.r > colorProfile.g && colorProfile.r > colorProfile.b) {
+      return 'erythrocyte';
+    }
+    if (radius >= this.NORMAL_RANGES.thrombocyte.size.min && 
+        radius <= this.NORMAL_RANGES.thrombocyte.size.max) {
+      return 'thrombocyte';
+    }
+    if (radius > this.NORMAL_RANGES.leukocyte.size.max) {
+      return 'blast';
+    }
+    return 'abnormal';
+  }
+
+  private analyzeMorphology(radius: number, shape: number, colorProfile: { difference: number }) {
+    return {
+      size: this.determineSizeCategory(radius),
+      shape: this.determineShapeCategory(shape),
+      color: this.determineColorCategory(colorProfile.difference),
+      inclusions: this.detectInclusions(colorProfile.difference)
+    };
+  }
+
+  private determineSizeCategory(radius: number): 'normal' | 'microcytic' | 'macrocytic' {
+    if (radius < this.NORMAL_RANGES.erythrocyte.size.min) return 'microcytic';
+    if (radius > this.NORMAL_RANGES.erythrocyte.size.max) return 'macrocytic';
     return 'normal';
   }
 
-  private detectNucleoli(nucleusData: Float32Array): Array<{ x: number; y: number; size: number }> {
-    const nucleoli: Array<{ x: number; y: number; size: number }> = [];
-    const threshold = 0.8;
-    
-    for (let i = 0; i < nucleusData.length; i++) {
-      if (nucleusData[i] > threshold) {
-        // Simple nucleoli detection based on intensity
-        nucleoli.push({
-          x: i % this.canvas.width,
-          y: Math.floor(i / this.canvas.width),
-          size: 1
-        });
-      }
+  private determineShapeCategory(shape: number): 'normal' | 'sickle' | 'spherocytic' | 'elliptocytic' | 'irregular' {
+    if (shape > 0.9) return 'normal';
+    if (shape < 0.5) return 'sickle';
+    if (shape < 0.7) return 'elliptocytic';
+    if (shape < 0.8) return 'spherocytic';
+    return 'irregular';
+  }
+
+  private determineColorCategory(colorDifference: number): 'normal' | 'hypochromic' | 'hyperchromic' {
+    if (colorDifference < 0.2) return 'hypochromic';
+    if (colorDifference > 0.4) return 'hyperchromic';
+    return 'normal';
+  }
+
+  private detectInclusions(colorDifference: number): string[] {
+    const inclusions: string[] = [];
+    if (colorDifference > 0.6) inclusions.push('Howell-Jolly bodies');
+    if (colorDifference > 0.7) inclusions.push('Pappenheimer bodies');
+    return inclusions;
+  }
+
+  private identifyPathologies(cellType: BloodCellType, morphology: BloodCellData['morphology']): PathologyType[] {
+    const pathologies: PathologyType[] = [];
+    if (cellType === 'erythrocyte') {
+      if (morphology.size === 'microcytic') pathologies.push('anemia');
+      if (morphology.size === 'macrocytic') pathologies.push('polycythemia');
+      if (morphology.shape === 'sickle') pathologies.push('sickleCell');
+      if (morphology.shape === 'spherocytic') pathologies.push('spherocytosis');
+      if (morphology.shape === 'elliptocytic') pathologies.push('elliptocytosis');
     }
-    
-    return this.mergeNucleoli(nucleoli);
-  }
-
-  private mergeNucleoli(
-    nucleoli: Array<{ x: number; y: number; size: number }>
-  ): Array<{ x: number; y: number; size: number }> {
-    const merged: Array<{ x: number; y: number; size: number }> = [];
-    const used = new Set<number>();
-    
-    for (let i = 0; i < nucleoli.length; i++) {
-      if (used.has(i)) continue;
-      
-      let current = nucleoli[i];
-      used.add(i);
-      
-      for (let j = i + 1; j < nucleoli.length; j++) {
-        if (used.has(j)) continue;
-        
-        const other = nucleoli[j];
-        const distance = Math.sqrt(
-          Math.pow(current.x - other.x, 2) + Math.pow(current.y - other.y, 2)
-        );
-        
-        if (distance < 2) {
-          current = {
-            x: (current.x + other.x) / 2,
-            y: (current.y + other.y) / 2,
-            size: current.size + other.size
-          };
-          used.add(j);
-        }
-      }
-      
-      merged.push(current);
+    if (cellType === 'leukocyte') {
+      pathologies.push('leukemia');
     }
-    
-    return merged;
-  }
-
-  private analyzeNuclearShape(nucleusData: Float32Array): 'normal' | 'irregular' | 'cleaved' | 'folded' {
-    const perimeter = this.calculateNuclearPerimeter(nucleusData);
-    const area = this.calculateNuclearArea(nucleusData);
-    const circularity = (4 * Math.PI * area) / (perimeter * perimeter);
-    
-    if (circularity > 0.8) return 'normal';
-    if (circularity > 0.6) return 'irregular';
-    if (circularity > 0.4) return 'cleaved';
-    return 'folded';
-  }
-
-  private calculateNuclearPerimeter(nucleusData: Float32Array): number {
-    let perimeter = 0;
-    const width = Math.sqrt(nucleusData.length);
-    
-    for (let y = 1; y < width - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        const idx = y * width + x;
-        if (nucleusData[idx] > 0.5) {
-          if (nucleusData[idx - 1] <= 0.5 || 
-              nucleusData[idx + 1] <= 0.5 ||
-              nucleusData[idx - width] <= 0.5 || 
-              nucleusData[idx + width] <= 0.5) {
-            perimeter++;
-          }
-        }
-      }
-    }
-    
-    return perimeter;
-  }
-
-  private calculateNuclearArea(nucleusData: Float32Array): number {
-    return nucleusData.reduce((sum, val) => sum + (val > 0.5 ? 1 : 0), 0);
-  }
-
-  private calculateNCRatio(
-    cell: { radius: number },
-    nucleusData: Float32Array
-  ): number {
-    const cellArea = Math.PI * cell.radius * cell.radius;
-    const nucleusArea = this.calculateNuclearArea(nucleusData);
-    return nucleusArea / cellArea;
-  }
-
-  private determineLeukocyteType(
-    cellType: BloodCellType,
-    nuclearFeatures: any
-  ): LeukocyteType | undefined {
-    if (cellType !== 'leukocyte' && cellType !== 'blast') return undefined;
-    
-    const { chromatin, nucleoli, shape, ncRatio } = nuclearFeatures;
-    
     if (cellType === 'blast') {
-      if (chromatin === 'loose' && nucleoli) {
-        return ncRatio > 0.8 ? 'myelobl ast' : 'lymphoblast';
-      }
-      return 'blast';
+      pathologies.push('leukemia');
+      pathologies.push('lymphoma');
     }
-    
-    // Determine mature leukocyte type
-    if (shape === 'segmented' && chromatin === 'condensed') return 'neutrophil';
-    if (shape === 'round' && chromatin === 'condensed') return 'lymphocyte';
-    if (shape === 'irregular' && chromatin === 'loose') return 'monocyte';
-    if (chromatin === 'condensed' && ncRatio > 0.7) return 'eosinophil';
-    if (chromatin === 'condensed' && ncRatio > 0.6) return 'basophil';
-    
-    return 'neutrophil'; // Default case
+    return pathologies;
   }
 
-  private assessCellularMaturation(cells: BloodCellData[]): MaturationAssessment[] {
-    const assessments: MaturationAssessment[] = [];
-    
-    // Assess myeloid maturation
-    const myeloidCells = cells.filter(cell => 
-      cell.cellType === 'leukocyte' || 
-      (cell.cellType === 'blast' && cell.leukocyteType === 'myeloblast')
-    );
-    
-    if (myeloidCells.length > 0) {
-      const myeloidAssessment = {
-        lineage: 'myeloid' as const,
-        maturationStages: this.calculateMaturationStages(myeloidCells, 'myeloid'),
-        dysplasticFeatures: this.identifyDysplasticFeatures(myeloidCells, 'myeloid'),
-        conclusion: this.generateMaturationConclusion(myeloidCells, 'myeloid')
-      };
-      assessments.push(myeloidAssessment);
-    }
-    
-    // Assess erythroid maturation
-    const erythroidCells = cells.filter(cell => 
-      cell.cellType === 'erythrocyte' || 
-      cell.cellType === 'megaloblast'
-    );
-    
-    if (erythroidCells.length > 0) {
-      const erythroidAssessment = {
-        lineage: 'erythroid' as const,
-        maturationStages: this.calculateMaturationStages(erythroidCells, 'erythroid'),
-        dysplasticFeatures: this.identifyDysplasticFeatures(erythroidCells, 'erythroid'),
-        conclusion: this.generateMaturationConclusion(erythroidCells, 'erythroid')
-      };
-      assessments.push(erythroidAssessment);
-    }
-    
-    return assessments;
+  private determineLocation(cell: { x: number; y: number }): string {
+    const y = cell.y;
+    if (y < this.canvas.height / 3) return 'superior';
+    if (y > (this.canvas.height * 2) / 3) return 'inferior';
+    return 'central';
   }
 
-  private calculateMaturationStages(
-    cells: BloodCellData[],
-    lineage: 'myeloid' | 'erythroid'
-  ) {
-    const stages = [];
-    const criteria = this.MATURATION_CRITERIA[lineage];
-    
-    for (const [stage, requirements] of Object.entries(criteria)) {
-      const matchingCells = cells.filter(cell => {
-        const measurements = cell.measurements;
-        const morphology = cell.morphology;
-        
-        return (
-          measurements.diameter >= requirements.size[0] &&
-          measurements.diameter <= requirements.size[1] &&
-          morphology.nuclearFeatures?.chromatin === requirements.chromatin &&
-          morphology.nuclearFeatures?.nucleoli === requirements.nucleoli
-        );
-      });
-      
-      stages.push({
-        stage,
-        percentage: (matchingCells.length / cells.length) * 100,
-        abnormalities: this.identifyStageDysplasia(matchingCells, stage)
-      });
-    }
-    
-    return stages;
-  }
-
-  private identifyDysplasticFeatures(
-    cells: BloodCellData[],
-    lineage: 'myeloid' | 'erythroid' | 'megakaryocytic'
+  private determineCharacteristics(
+    cell: { radius: number },
+    shape: number,
+    colorDifference: number
   ): string[] {
-    const features = new Set<string>();
-    const criteria = this.DYSPLASIA_FEATURES[lineage];
-    
+    const characteristics: string[] = [];
+    if (cell.radius > 10) characteristics.push('enlarged');
+    else if (cell.radius < 4) characteristics.push('atrophied');
+    if (shape < 0.8) characteristics.push('irregular');
+    if (colorDifference > 0.3) characteristics.push('high intensity');
+    if (colorDifference > 0.5) characteristics.push('possible malignant');
+    return characteristics;
+  }
+
+  private calculateStatistics(cells: BloodCellData[]): BloodAnalysisStatistics {
+    const totalCells = cells.length;
+    const abnormalCells = cells.filter(c => 
+      c.characteristics.includes('high intensity') ||
+      c.characteristics.includes('irregular') ||
+      c.characteristics.includes('enlarged')
+    ).length;
+
+    const cellCounts = {
+      erythrocyte: 0,
+      leukocyte: 0,
+      thrombocyte: 0,
+      blast: 0,
+      abnormal: 0
+    };
+
+    const pathologyCounts = {
+      anemia: 0,
+      leukemia: 0,
+      lymphoma: 0,
+      myeloma: 0,
+      thrombocytopenia: 0,
+      polycythemia: 0,
+      sickleCell: 0,
+      thalassemia: 0,
+      spherocytosis: 0,
+      elliptocytosis: 0,
+      neutrophilia: 0,
+      lymphocytosis: 0,
+      monocytosis: 0,
+      eosinophilia: 0,
+      basophilia: 0
+    };
+
     cells.forEach(cell => {
-      const morphology = cell.morphology;
-      const measurements = cell.measurements;
-      
-      criteria.forEach(feature => {
-        switch (feature) {
-          case 'nuclear budding':
-            if (morphology.nuclearFeatures?.shape === 'irregular') features.add(feature);
-            break;
-          case 'internuclear bridging':
-            if (morphology.nuclearFeatures?.shape === 'irregular') features.add(feature);
-            break;
-          case 'megaloblastic changes':
-            if (morphology.size === 'megaloblastic') features.add(feature);
-            break;
-          case 'hypogranulation':
-            if (cell.cellType === 'leukocyte' && measurements.intensity < 0.3) features.add(feature);
-            break;
-          case 'pseudo-Pelger-Huet':
-            if (morphology.nuclearFeatures?.shape === 'irregular') features.add(feature);
-            break;
-          // Add more specific criteria checks
-        }
+      cellCounts[cell.cellType]++;
+      cell.pathologyIndicators.forEach(pathology => {
+        pathologyCounts[pathology]++;
       });
     });
-    
-    return Array.from(features);
-  }
 
-  private identifyStageDysplasia(cells: BloodCellData[], stage: string): string[] {
-    const abnormalities: string[] = [];
-    
-    cells.forEach(cell => {
-      const morphology = cell.morphology;
-      
-      if (morphology.size !== 'normal') {
-        abnormalities.push(`Tamanho anormal em ${stage}`);
-      }
-      
-      if (morphology.nuclearFeatures?.chromatin === 'abnormal') {
-        abnormalities.push(`Cromatina anormal em ${stage}`);
-      }
-      
-      if (morphology.shape !== 'normal') {
-        abnormalities.push(`Forma anormal em ${stage}`);
-      }
-    });
-    
-    return [...new Set(abnormalities)];
-  }
-
-  private generateMaturationConclusion(
-    cells: BloodCellData[],
-    lineage: 'myeloid' | 'erythroid'
-  ): string {
-    const totalCells = cells.length;
-    const immatureCells = cells.filter(cell => 
-      cell.morphology.maturity === 'immature' || 
-      cell.morphology.maturity === 'blast'
-    ).length;
-    
-    const immaturityRatio = immatureCells / totalCells;
-    const dysplasticFeatures = this.identifyDysplasticFeatures(cells, lineage);
-    
-    if (immaturityRatio > 0.2) {
-      return `Maturação ${lineage} alterada com bloqueio maturativo. ${
-        dysplasticFeatures.length > 0 
-          ? `Características displásicas: ${dysplasticFeatures.join(', ')}.` 
-          : ''
-      }`;
-    }
-    
-    if (dysplasticFeatures.length > 0) {
-      return `Maturação ${lineage} com alterações displásicas: ${dysplasticFeatures.join(', ')}.`;
-    }
-    
-    return `Maturação ${lineage} sem alterações significativas.`;
-  }
-
-  private performDifferentialCount(cells: BloodCellData[]): DifferentialCount[] {
-    const totalLeukocytes = cells.filter(cell => 
-      cell.cellType === 'leukocyte' || 
-      cell.cellType === 'blast'
-    ).length;
-    
-    const counts = new Map<LeukocyteType, number>();
-    const morphologyNotes = new Map<LeukocyteType, Set<string>>();
-    
-    cells.forEach(cell => {
-      if (cell.leukocyteType) {
-        counts.set(cell.leukocyteType, (counts.get(cell.leukocyteType) || 0) + 1);
-        
-        if (!morphologyNotes.has(cell.leukocyteType)) {
-          morphologyNotes.set(cell.leukocyteType, new Set());
-        }
-        
-        const notes = morphologyNotes.get(cell.leukocyteType)!;
-        if (cell.morphology.nuclearFeatures?.shape !== 'normal') {
-          notes.add(`Alteração nuclear: ${cell.morphology.nuclearFeatures?.shape}`);
-        }
-        if (cell.characteristics.length > 0) {
-          notes.add(`Características: ${cell.characteristics.join(', ')}`);
-        }
-      }
-    });
-    
-    return Array.from(counts.entries()).map(([type, count]) => ({
-      cellType: type,
-      percentage: (count / totalLeukocytes) * 100,
-      absoluteCount: count,
-      morphologyNotes: Array.from(morphologyNotes.get(type) || [])
-    }));
-  }
-
-  private analyzeDysplasticFeatures(cells: BloodCellData[]): {
-    erythroid: string[];
-    myeloid: string[];
-    megakaryocytic: string[];
-    severity: 'mild' | 'moderate' | 'severe';
-  } {
-    const erythroidCells = cells.filter(cell => 
-      cell.cellType === 'erythrocyte' || 
-      cell.cellType === 'megaloblast'
-    );
-    
-    const myeloidCells = cells.filter(cell => 
-      cell.cellType === 'leukocyte' || 
-      cell.cellType === 'blast'
-    );
-    
-    const erythroidFeatures = this.identifyDysplasticFeatures(erythroidCells, 'erythroid');
-    const myeloidFeatures = this.identifyDysplasticFeatures(myeloidCells, 'myeloid');
-    const megakaryocyticFeatures = this.identifyDysplasticFeatures([], 'megakaryocytic'); // Placeholder
-    
-    const totalFeatures = 
-      erythroidFeatures.length + 
-      myeloidFeatures.length + 
-      megakaryocyticFeatures.length;
-    
-    let severity: 'mild' | 'moderate' | 'severe';
-    if (totalFeatures > 5) severity = 'severe';
-    else if (totalFeatures > 2) severity = 'moderate';
-    else severity = 'mild';
-    
     return {
-      erythroid: erythroidFeatures,
-      myeloid: myeloidFeatures,
-      megakaryocytic: megakaryocyticFeatures,
-      severity
+      totalCells,
+      abnormalCells,
+      averageSize: cells.reduce((sum, c) => sum + c.size, 0) / totalCells,
+      averageColorDifference: cells.reduce((sum, c) => sum + c.colorDifference, 0) / totalCells,
+      infestationPercentage: (abnormalCells / totalCells) * 100,
+      criticalAreas: cells.filter(c => c.characteristics.includes('possible malignant')).length,
+      cellCounts,
+      pathologyCounts,
+      ratios: {
+        neutrophilToLymphocyte: cellCounts.leukocyte > 0 ? cellCounts.leukocyte / totalCells : 0,
+        redToWhiteCell: cellCounts.erythrocyte / (cellCounts.leukocyte || 1),
+        plateletToRedCell: cellCounts.thrombocyte / (cellCounts.erythrocyte || 1)
+      }
     };
   }
 
-  private generateComprehensiveDiagnosis(
-    cells: BloodCellData[],
-    statistics: BloodAnalysisStatistics,
-    maturationAssessment: MaturationAssessment[],
-    differentialCount: DifferentialCount[],
-    dysplasiaAnalysis: any
-  ): string {
-    const findings: string[] = [];
-    
-    // Analyze blast percentage
-    const blastPercentage = statistics.ratios.blastPercentage;
-    if (blastPercentage > 20) {
-      findings.push(`ALERTA: ${blastPercentage.toFixed(1)}% de blastos - Suspeita de Leucemia Aguda`);
-    } else if (blastPercentage > 5) {
-      findings.push(`Aumento de blastos (${blastPercentage.toFixed(1)}%) - Avaliar Síndrome Mielodisplásica`);
-    }
-    
-    // Analyze dysplasia
-    if (dysplasiaAnalysis.severity !== 'mild') {
-      findings.push(`Alterações displásicas ${dysplasiaAnalysis.severity === 'severe' ? 'graves' : 'moderadas'}:`);
-      if (dysplasiaAnalysis.erythroid.length > 0) {
-        findings.push(`- Série eritróide: ${dysplasiaAnalysis.erythroid.join(', ')}`);
-      }
-      if (dysplasiaAnalysis.myeloid.length > 0) {
-        findings.push(`- Série mielóide: ${dysplasiaAnalysis.myeloid.join(', ')}`);
-      }
-    }
-    
-    // Analyze maturation patterns
-    maturationAssessment.forEach(assessment => {
-      if (assessment.dysplasticFeatures.length > 0) {
-        findings.push(`Alterações na maturação ${assessment.lineage}:`);
-        findings.push(`- ${assessment.conclusion}`);
-      }
-    });
-    
-    // Analyze differential count
-    const abnormalDifferential = differentialCount.filter(count => 
-      count.morphologyNotes.length > 0 || 
-      count.percentage > 20
-    );
-    
-    if (abnormalDifferential.length > 0) {
-      findings.push('\nContagem diferencial alterada:');
-      abnormalDifferential.forEach(count => {
-        findings.push(`- ${count.cellType}: ${count.percentage.toFixed(1)}% ${
-          count.morphologyNotes.length > 0 
-            ? `(${count.morphologyNotes.join(', ')})` 
-            : ''
-        }`);
-      });
-    }
-    
-    // Add pathology counts
-    Object.entries(statistics.pathologyCounts).forEach(([pathology, count]) => {
-      if (count > 0) {
-        findings.push(`\n${pathology}: ${this.PATHOLOGY_DESCRIPTIONS[pathology as PathologyType]}\nQuantidade: ${count} células`);
-      }
-    });
-    
-    // Generate final conclusion
-    let conclusion = 'CONCLUSÃO:\n';
-    if (findings.length > 0) {
-      conclusion += findings.join('\n\n');
-      conclusion += '\n\nRECOMENDAÇÕES:\n';
-      if (blastPercentage > 20) {
-        conclusion += '- Encaminhamento URGENTE para hematologista\n';
-        conclusion += '- Considerar biópsia de medula óssea\n';
-        conclusion += '- Imunofenotipagem recomendada';
-      } else if (dysplasiaAnalysis.severity !== 'mild' || blastPercentage > 5) {
-        conclusion += '- Avaliação hematológica especializada\n';
-        conclusion += '- Considerar investigação de Síndrome Mielodisplásica\n';
-        conclusion += '- Acompanhamento periódico recomendado';
-      } else {
-        conclusion += '- Acompanhamento clínico regular\n';
-        conclusion += '- Repetir hemograma em 30 dias';
-      }
-    } else {
-      conclusion += 'Sem alterações morfológicas significativas. Padrão hematológico dentro da normalidade.';
-    }
-    
-    return conclusion;
+  private determineAbnormalityLevel(statistics: BloodAnalysisStatistics): CellAnalysisLevel {
+    if (statistics.infestationPercentage > 30) return 'high';
+    if (statistics.infestationPercentage > 10) return 'medium';
+    return 'low';
   }
 
-  private drawDetailedAnnotations(
-    cells: Array<{ x: number; y: number; radius: number }>,
-    cellData: BloodCellData[],
-    maturationAssessment: MaturationAssessment[]
-  ) {
+  private generateDetailedDiagnosis(cells: BloodCellData[], statistics: BloodAnalysisStatistics): string {
+    const findings: string[] = [];
+
+    // Analyze cell distribution
+    if (statistics.cellCounts.blast > 0) {
+      findings.push(`Presença de ${statistics.cellCounts.blast} células blásticas - Possível leucemia`);
+    }
+
+    if (statistics.cellCounts.abnormal > 0) {
+      findings.push(`${statistics.cellCounts.abnormal} células com morfologia anormal`);
+    }
+
+    // Check for specific conditions and add their descriptions
+    Object.entries(statistics.pathologyCounts).forEach(([pathology, count]) => {
+      if (count > 0) {
+        findings.push(`${pathology}: ${this.PATHOLOGY_DESCRIPTIONS[pathology as PathologyType]}\nQuantidade detectada: ${count} células`);
+      }
+    });
+
+    // Add cell distribution analysis
+    findings.push(`\nDistribuição celular:
+- Eritrócitos: ${statistics.cellCounts.erythrocyte}
+- Leucócitos: ${statistics.cellCounts.leukocyte}
+- Plaquetas: ${statistics.cellCounts.thrombocyte}
+- Células Blásticas: ${statistics.cellCounts.blast}
+- Células Anormais: ${statistics.cellCounts.abnormal}
+
+Índices importantes:
+- Relação Neutrófilo/Linfócito: ${statistics.ratios.neutrophilToLymphocyte.toFixed(2)}
+- Relação Hemácias/Leucócitos: ${statistics.ratios.redToWhiteCell.toFixed(2)}
+- Relação Plaquetas/Hemácias: ${statistics.ratios.plateletToRedCell.toFixed(2)}`);
+
+    // Generate comprehensive diagnosis
+    if (findings.length > 0) {
+      return `Análise Hematológica Detalhada:\n\n${findings.join('\n\n')}\n\nRecomendação: Avaliação hematológica especializada`;
+    }
+
+    return 'Padrão hematológico dentro dos parâmetros de normalidade';
+  }
+
+  private drawAnnotations(cells: Array<{ x: number; y: number; radius: number }>, cellData: BloodCellData[]) {
     cells.forEach((cell, index) => {
       const data = cellData[index];
-      
-      // Draw cell outline
       this.ctx.beginPath();
       this.ctx.arc(cell.x, cell.y, cell.radius, 0, 2 * Math.PI);
       this.ctx.strokeStyle = this.getCellColor(data);
       this.ctx.lineWidth = 2;
       this.ctx.stroke();
-      
-      // Add detailed labels
       if (data.pathologyIndicators.length > 0 || data.characteristics.length > 0) {
         this.ctx.fillStyle = this.ctx.strokeStyle;
         this.ctx.font = '10px Arial';
-        
-        // Cell type and ID
         this.ctx.fillText(
-          `#${data.id}: ${data.cellType}${data.leukocyteType ? ` (${data.leukocyteType})` : ''}`,
+          `#${data.id}: ${data.cellType} - ${data.pathologyIndicators.join(', ')}`,
           cell.x - cell.radius,
-          cell.y - cell.radius - 15
+          cell.y - cell.radius - 5
         );
-        
-        // Pathology indicators
-        if (data.pathologyIndicators.length > 0) {
-          this.ctx.fillText(
-            `Patologia: ${data.pathologyIndicators.join(', ')}`,
-            cell.x - cell.radius,
-            cell.y - cell.radius - 5
-          );
-        }
-        
-        // Morphological features
-        if (data.characteristics.length > 0) {
-          this.ctx.fillText(
-            `Características: ${data.characteristics.join(', ')}`,
-            cell.x - cell.radius,
-            cell.y - cell.radius + 5
-          );
-        }
-      }
-      
-      // Draw nuclear features if present
-      if (data.morphology.nuclearFeatures) {
-        this.ctx.beginPath();
-        const nuclearRadius = cell.radius * Math.sqrt(data.morphology.nuclearFeatures.ncRatio);
-        this.ctx.arc(cell.x, cell.y, nuclearRadius, 0, 2 * Math.PI);
-        this.ctx.strokeStyle = '#000066';
-        this.ctx.lineWidth = 1;
-        this.ctx.stroke();
       }
     });
-    
-    // Add maturation assessment summary
-    let y = 30;
-    this.ctx.fillStyle = '#000000';
-    this.ctx.font = '12px Arial';
-    
-    maturationAssessment.forEach(assessment => {
-      this.ctx.fillText(
-        `${assessment.lineage} Maturation: ${assessment.conclusion}`,
-        10,
-        y
-      );
-      y += 20;
-      
-      if (assessment.dysplasticFeatures.length > 0) {
-        this.ctx.fillText(
-          `Dysplastic Features: ${assessment.dysplasticFeatures.join(', ')}`,
-          20,
-          y
-        );
-        y += 20;
-      }
-    });
+  }
+
+  private getCellColor(cell: BloodCellData): string {
+    if (cell.pathologyIndicators.includes('leukemia')) return '#ff0000';
+    if (cell.pathologyIndicators.includes('anemia')) return '#ff9900';
+    if (cell.pathologyIndicators.includes('sickleCell')) return '#ff00ff';
+    switch (cell.cellType) {
+      case 'erythrocyte': return '#ff6b6b';
+      case 'leukocyte': return '#4dabf7';
+      case 'thrombocyte': return '#51cf66';
+      case 'blast': return '#ff0000';
+      default: return '#adb5bd';
+    }
   }
 }

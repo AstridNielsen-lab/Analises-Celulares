@@ -41,12 +41,7 @@ export type LeukocyteType =
   | 'monocyte'
   | 'eosinophil'
   | 'basophil'
-  | 'blast'
-  | 'myeloblast'     // Added for myeloid disorders
-  | 'lymphoblast'    // Added for lymphoid disorders
-  | 'promyelocyte'   // Added for maturation analysis
-  | 'myelocyte'      // Added for maturation analysis
-  | 'metamyelocyte'; // Added for maturation analysis
+  | 'blast';
 
 export type PathologyType =
   | 'anemia'
@@ -80,12 +75,6 @@ export interface BloodCellData extends CellData {
     color: 'normal' | 'hypochromic' | 'hyperchromic';
     maturity: 'mature' | 'immature' | 'blast';
     inclusions?: string[]; // For special cellular inclusions
-    nuclearFeatures?: {
-      chromatin: 'normal' | 'condensed' | 'loose' | 'abnormal';
-      nucleoli: boolean;
-      nucleusShape: 'normal' | 'irregular' | 'cleaved' | 'folded';
-      nucleusCytoplasm: number; // N:C ratio
-    };
   };
   measurements: {
     diameter: number;      // in micrometers
@@ -93,7 +82,6 @@ export interface BloodCellData extends CellData {
     perimeter: number;    // in micrometers
     circularity: number;  // 0-1 scale
     intensity: number;    // 0-255 scale
-    nuclearArea?: number; // for nuclear analysis
   };
 }
 
@@ -113,21 +101,12 @@ export interface BloodAnalysisStatistics extends CellStatistics {
     plateletToRedCell: number;
     blastPercentage: number;
     myeloidToErythroid: number;
-    immatureTotalRatio: number;    // Added for maturation assessment
-    nucleatedRBCCount: number;     // Added for erythroid maturation
   };
   indices: {
     mcv: number;  // Mean Corpuscular Volume
     mch: number;  // Mean Corpuscular Hemoglobin
     mchc: number; // Mean Corpuscular Hemoglobin Concentration
     rdw: number;  // Red Cell Distribution Width
-    mpm: number;  // Mean Platelet Mass
-    mpv: number;  // Mean Platelet Volume
-  };
-  maturationIndices: {
-    myeloidMaturationIndex: number;    // For granulocytic series
-    erythroidMaturationIndex: number;  // For erythroid series
-    dysplasiaScore: number;           // For MDS assessment
   };
 }
 
@@ -138,31 +117,4 @@ export interface PathologyDescription {
   severity: 'mild' | 'moderate' | 'severe';
   recommendations: string[];
   differentialDiagnosis: string[];
-  morphologicalFeatures: string[];
-  clinicalCorrelation: string[];
-}
-
-export interface MaturationAssessment {
-  lineage: 'myeloid' | 'erythroid' | 'megakaryocytic';
-  maturationStages: {
-    stage: string;
-    percentage: number;
-    abnormalities: string[];
-  }[];
-  dysplasticFeatures: string[];
-  conclusion: string;
-}
-
-export interface DifferentialCount {
-  cellType: LeukocyteType;
-  percentage: number;
-  absoluteCount: number;
-  morphologyNotes: string[];
-}
-
-export interface CellularInclusions {
-  name: string;
-  frequency: 'rare' | 'occasional' | 'frequent';
-  significance: string[];
-  associatedPathologies: PathologyType[];
 }
