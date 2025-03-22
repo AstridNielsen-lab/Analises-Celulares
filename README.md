@@ -22,7 +22,7 @@ Este projeto realiza análises de imagens microscópicas para identificar caract
 
 Caso tenha dúvidas, sugestões ou problemas, entre em contato conosco:
 
-- E-mail: suporte@likelooksolutions.com.br *(exemplo)*
+- E-mail: juliocamposmachado@gmail.com 
 - Telefone: +55 11 97060-3441
 
 ## Créditos
